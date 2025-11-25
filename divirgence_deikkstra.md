@@ -543,6 +543,29 @@ if __name__ == "__main__":
 
 ## 5. Установка зависимостей
 
+
+## Обновление системы и установка Python
+
+```bash
+# Обновление пакетов системы
+sudo apt update && sudo apt upgrade -y
+
+# Установка Python 3 и pip (если не установлены)
+sudo apt install python3 python3-pip -y
+
+# Проверка установки
+python3 --version
+pip3 --version
+```
+
+## Создание рабочей директории
+
+```bash
+# Создание папки для проекта
+mkdir ~/dijkstra_network
+cd ~/dijkstra_network
+```
+
 Для этого кода нужен только Python 3.6+ со стандартными библиотеками:
 
 ```bash
