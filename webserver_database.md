@@ -344,3 +344,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO p6_web_user
 3. **Проверьте логи** - не должно быть ошибок прав доступа
 
 **Итог:** Используйте того же пользователя, что и в толстом клиенте, или создайте нового с такими же правами. Администратор БД не нужен и опасен для работы приложения.
+
+user=pubuser7
+url=jdbc:microsoft:sqlserver://prim-db-srv-07.novaenergies.local:1433
+selectMethod=cursor
+dataSourceName=SQL2000JDBC
+userName=pubuser7
+databaseName=Project_R
+serverName=prim-db-srv-07.novaenergies.local
