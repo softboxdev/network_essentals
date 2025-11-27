@@ -53,7 +53,24 @@ echo "user_finance:password123" | sudo chpasswd
 echo "user_dev:password123" | sudo chpasswd
 echo "user_hr:password123" | sudo chpasswd
 ```
+```
 
+
+# 1. Просмотр меток файлов и каталогов
+ls -Z /lab/
+ls -Z /lab/public/
+
+# 2. Детальный просмотр меток с помощью getfattr
+sudo getfattr -d -m security.selinux /lab/secret/
+sudo getfattr -d -m security.selinux /lab/secret/contract.txt
+
+# 3. Просмотр меток процессов
+ps -eZ | head -10
+ps -Z -u alice
+
+# 4. Просмотр меток сетевых портов
+sudo netstat -tulpnZ
+```
 ### **Задание 2: Назначение мандатных меток**
 
 **Цель:** Научиться назначать и просматривать мандатные метки
