@@ -223,3 +223,359 @@ FreeIPA может быть центром не только для учётны
 ### Заключение
 
 FreeIPA — это мощный "комбайн", который превращает разрозненные Linux-системы в единую, безопасную и управляемую инфраструктуру. Начинайте с малого: установите один сервер, присоедините к нему тестовый клиент, создайте пользователя и поэкспериментируйте с политиками Sudo и HBAC. Понимание приходит с практикой. В контексте Astra Linux всегда помните о тесной интеграции и особенностях настройки мандатного контроля.
+
+---
+
+## 1. Настройка репликации серверов FreeIPA
+
+Репликация нужна для **отказоустойчивости** и **балансировки нагрузки**. Если главный сервер (мастер) упадёт, реплика продолжит обслуживать запросы на аутентификацию и управление.
+
+### Типы репликации
+
+*   **CA-репликация**: Реплицируются данные Центра Сертификации.
+*   **DNS-репликация**: Реплицируются зоны DNS.
+*   **Data-репликация**: Реплицируются основные данные (пользователи, хосты, политики) через 389 Directory Server.
+
+### Процесс настройки репликации
+
+**Предварительные требования:**
+1.  Время на обоих серверах синхронизировано (NTP).
+2.  Имена хостов корректно разрешаются в DNS.
+3.  Порты для репликации открыты в firewall (389, 443, 7389 и др.).
+
+**Шаг 1: Настройка мастер-сервера**
+На первом сервере обычно всё уже настроено. Убедитесь, что он полностью работоспособен.
+
+**Шаг 2: Установка и настройка реплики**
+
+На новом сервере (который станет репликой):
+
+1.  **Установите пакеты IPA-клиента и сервера:**
+    ```bash
+    sudo apt update && sudo apt install freeipa-server freeipa-client
+    ```
+
+2.  **Присоедините сервер к домену как реплику:**
+    Вам понадобится пароль администратора (`admin`) домена.
+    ```bash
+    sudo ipa-replica-install
+    ```
+    *   Скрипт запросит пароль администратора.
+    *   Он автоматически найдёт мастер-сервер, скопирует все данные и настроит репликацию.
+    *   Если используется встроенный DNS, реплика автоматически добавит себя в DNS-зону.
+
+3.  **Проверка репликации:**
+    *   На реплике выполните:
+    ```bash
+    sudo ipa-replica-manage list
+    ```
+    *   Создайте пользователя на мастер-сервере и проверьте, что он появился на реплике (и наоборот, если включена многомастерная репликация).
+
+**Важно:** В Astra Linux процесс идентичен, но убедитесь, что используются пакеты из официальных репозиториев Astra.
+
+---
+
+## 2. Конфигурация сервисов с доменной аутентификацией FreeIPA
+
+Общий принцип: сервис должен "доверять" FreeIPA для проверки учётных данных. Это реализуется через **Kerberos** (для единого входа) и **LDAP** (для поиска информации о пользователях/группах). Ключевой посредник — **SSSD**.
+
+### Apache2 (веб-аутентификация)
+
+Цель: защитить часть сайта паролем доменной учётной записи.
+
+1.  **Установите модули:**
+    ```bash
+    sudo apt install libapache2-mod-auth-kerb libapache2-mod-authnz-pam
+    ```
+
+2.  **Создайте HTTP-ключ (keytab) для веб-сервера:**
+    На IPA-сервере:
+    ```bash
+    ipa service-add HTTP/webserver.example.local
+    ```
+    Затем получите keytab и скопируйте его на веб-сервер:
+    ```bash
+    ipa-getkeytab -s ipa01.example.local -k /etc/apache2/auth/apache2.keytab -p HTTP/webserver.example.local
+    ```
+
+3.  **Настройте виртуальный хост Apache:**
+    В конфиге сайта (`/etc/apache2/sites-available/my-secured-site.conf`):
+    ```apache
+    <Location /secured>
+        AuthType Kerberos
+        AuthName "FreeIPA Domain Login"
+        KrbAuthRealms EXAMPLE.LOCAL
+        KrbServiceName HTTP
+        Krb5Keytab /etc/apache2/auth/apache2.keytab
+        KrbMethodNegotiate on
+        KrbMethodK5Passwd on
+
+        # Использование PAM через mod_authnz_pam
+        AuthBasicProvider PAM
+        AuthPAMService apache
+
+        Require valid-user
+    </Location>
+    ```
+
+4.  **Настройте PAM:** В файле `/etc/pam.d/apache` добавьте строку:
+    ```
+    auth sufficient pam_sss.so
+    account sufficient pam_sss.so
+    ```
+
+### Samba (файловый сервер)
+
+Цель: сделать Samba-сервер членом домена и раздавать права на папки на основе доменных групп.
+
+1.  **Установите Samba:**
+    ```bash
+    sudo apt install samba samba-common-bin
+    ```
+
+2.  **Присоедините сервер к домену FreeIPA:**
+    ```bash
+    sudo ipa-client-install --enable-dns-updates --mkhomedir
+    ```
+
+3.  **Настройте `/etc/samba/smb.conf`:**
+    ```ini
+    [global]
+        workgroup = EXAMPLE
+        realm = EXAMPLE.LOCAL
+        security = ads
+        dedicated keytab file = /etc/krb5.keytab
+        kerberos method = secrets and keytab
+        log file = /var/log/samba/log.%m
+        idmap config * : backend = sss
+        winbind use default domain = yes
+        winbind offline logon = false
+
+    [public_share]
+        path = /srv/samba/share
+        read only = no
+        # Разрешить доступ доменной группе "users"
+        valid users = @EXAMPLE.LOCAL\users
+    ```
+
+4.  **Перезапустите Samba:** `sudo systemctl restart smbd nmbd winbind`
+
+### PostgreSQL
+
+Цель: использовать доменные учётные записи для входа в СУБД.
+
+1.  **Настройте PostgreSQL на использование PAM:**
+    В `/etc/postgresql/*/main/pg_hba.conf` добавьте:
+    ```
+    host all all 192.168.1.0/24 pam pamservice=postgresql
+    ```
+    Создайте файл `/etc/pam.d/postgresql`:
+    ```
+    auth sufficient pam_sss.so
+    account sufficient pam_sss.so
+    ```
+
+2.  **Создайте пользователей в PostgreSQL:**
+    Подключитесь к БД и создайте роли с именами, совпадающими с доменными логинами.
+    ```sql
+    CREATE ROLE "ivanov" LOGIN;
+    ```
+
+### Exim + Dovecot (почтовый сервер)
+
+Цель: аутентификация пользователей при отправке (SMTP, Exim) и получении (IMAP, Dovecot) почты через доменные учётные данные.
+
+1.  **Установите почтовые сервисы:**
+    ```bash
+    sudo apt install exim4-daemon-heavy dovecot-imapd
+    ```
+
+2.  **Настройте Exim (SMTP) на аутентификацию:**
+    В конфигурации Exim (`/etc/exim4/conf.d/auth/30_exim4-config_examples`):
+    ```
+    plain_server:
+      driver = plaintext
+      public_name = PLAIN
+      server_condition = "${if pam{sss:${extract{1}{:}{$auth2}}{$auth3}}{1}{0}}"
+      server_set_id = $auth2
+      server_prompts = :
+    ```
+
+3.  **Настройте Dovecot (IMAP) на использование SSSD:**
+    В `/etc/dovecot/conf.d/10-auth.conf`:
+    ```
+    auth_mechanisms = plain login
+    !include auth-system.conf.ext
+    ```
+    В `/etc/dovecot/conf.d/auth-system.conf.ext`:
+    ```
+    passdb {
+      driver = pam
+      args = dovecot
+    }
+    userdb {
+      driver = passwd
+    }
+    ```
+    Создайте файл `/etc/pam.d/dovecot`:
+    ```
+    auth sufficient pam_sss.so
+    account sufficient pam_sss.so
+    ```
+
+### SQUID (прокси-сервер)
+
+Цель: разрешить доступ в интернет только аутентифицированным доменным пользователям.
+
+1.  **Установите Squid:**
+    ```bash
+    sudo apt install squid
+    ```
+
+2.  **Настройте аутентификацию в `/etc/squid/squid.conf`:**
+    ```
+    auth_param basic program /usr/lib/squid/basic_pam_auth -P
+    auth_param basic realm Squid proxy for EXAMPLE.LOCAL
+    auth_param basic credentialsttl 2 hours
+    acl authenticated proxy_auth REQUIRED
+    http_access allow authenticated
+    http_access deny all
+    ```
+
+---
+
+## 3. Создание доверительных отношений с Microsoft AD
+
+Это позволяет пользователям из домена AD входить в системы под управлением FreeIPA.
+
+### Предварительные требования
+
+*   Сетевая доступность между FreeIPA и AD-контроллерами.
+*   Корректное разрешение имён в обе стороны.
+*   Синхронизированное время.
+*   Учётная запись с правами администратора домена в AD.
+
+### Процесс настройки доверия
+
+1.  **Настройте обратную зону DNS** для сети AD в DNS FreeIPA.
+
+2.  **Настройте доверие со стороны FreeIPA:**
+    ```bash
+    sudo ipa trust-add --type=ad ad.example.com --admin Administrator --password
+    ```
+    *   Скрипт запросит пароль учётной записи `Administrator` домена AD.
+    *   Он автоматически создаст все необходимые записи и настроит одностороннее доверие (AD -> FreeIPA).
+
+3.  **Проверка:**
+    *   Найдите пользователя из AD:
+    ```bash
+    ipa user-find --domain=ad.example.com
+    ```
+    *   Попробуйте войти на клиент FreeIPA, используя логин в формате `user@ad.example.com` и пароль из AD.
+
+---
+
+## 4. Резервное копирование и восстановление
+
+### Резервное копирование
+
+1.  **Data Backup (данные каталога):**
+    ```bash
+    sudo ipa-backup
+    ```
+    Создаёт папку с резервной копией в `/var/lib/ipa/backup/`.
+
+2.  **Резервное копирование файлов конфигурации:**
+    *   `/etc/ipa/` - основная конфигурация IPA.
+    *   `/etc/sssd/sssd.conf` - конфигурация SSSD.
+    *   `/etc/krb5.keytab` - ключи Kerberos.
+
+3.  **Резервное копирование CA:**
+    ```bash
+    sudo ipa-cacert-manage backup
+    ```
+
+### Восстановление
+
+1.  Остановите службы IPA: `sudo ipa-server-stop`
+2.  Восстановите данные из бэкапа: `sudo ipa-restore /var/lib/ipa/backup/ipa-backup-...`
+3.  Запустите службы IPA: `sudo ipa-server-start`
+4.  Проверьте целостность данных: `ipa config-show --all`
+
+---
+
+## 5. Поиск и исправление ошибок. Нестандартные ситуации
+
+### Логи для диагностики
+
+*   **FreeIPA / Directory Server:** `/var/log/dirsrv/slapd-EXAMPLE-LOCAL/`
+*   **Kerberos:** `/var/log/krb5kdc.log`
+*   **Apache / Web UI:** `/var/log/httpd/error_log`
+*   **SSSD (на клиентах):** `/var/log/sssd/`
+*   **IPA-команды:** Добавляйте ключ `-v` для подробного вывода (`ipa user-show -v admin`).
+
+### Частые проблемы и решения
+
+1.  **"Клиент не может присоединиться к домену" (GSS-API Error)**
+    *   **Причина:** Расхождение во времени (NTP), проблемы с DNS, закрытые порты.
+    *   **Решение:** Проверьте `timedatectl status`, убедитесь, что `nslookup ipa01.example.local` и `nslookup 192.168.1.10` работают в обе стороны.
+
+2.  **"Неверный пароль" при корректном вводе (KDC policy rejects)**
+    *   **Причина:** Политика паролей в IPA не позволяет использовать текущий пароль пользователя AD (например, слишком простой).
+    *   **Решение:** Настроить более мягкую политику паролей в IPA для доверенных пользователей или сменить пароль в AD.
+
+3.  **Пользователи AD не видятся в `ipa user-find`**
+    *   **Причина:** Доверие настроено, но синхронизация не произошла или есть проблемы с DNS.
+    *   **Решение:** Используйте `ipa-adtrust-install --enable-compat` для включения совместимого слоя. Проверьте логи `sssd` на клиенте.
+
+---
+
+## 6. Лабораторные работы
+
+### Лабораторная 1: Создание и настройка домена FreeIPA
+
+**Цель:** Развернуть первый сервер FreeIPA и присоединить к нему клиент.
+
+**Задачи:**
+1.  Установите Astra Linux на две виртуальные машины (`ipa-srv01`, `client01`).
+2.  На `ipa-srv01` задайте статический IP, FQDN (`ipa-srv01.lab.local`).
+3.  Установите пакеты `freeipa-server freeipa-server-dns`.
+4.  Запустите `ipa-server-install`, создав домен `lab.local` и realm `LAB.LOCAL`.
+5.  На `client01` настройте DNS-сервер на `ipa-srv01`.
+6.  Присоедините `client01` к домену с помощью `sudo ipa-client-install`.
+7.  Проверьте: войдите на `client01` под учётной записью `admin`, созданной на сервере.
+
+### Лабораторная 2: Настройка репликации и доверительных отношений
+
+**Цель:** Создать отказоустойчивую инфраструктуру и настроить доверие между двумя доменами FreeIPA.
+
+**Задачи:**
+1.  Разверните третью ВМ (`ipa-srv02.lab.local`).
+2.  Настройте репликацию с `ipa-srv01` на `ipa-srv02` с помощью `ipa-replica-install`.
+3.  Создайте второй, независимый домен FreeIPA (`domain2.local`) на другой ВМ.
+4.  Настройте двустороннее доверие между `lab.local` и `domain2.local` с помощью `ipa trust-add`.
+5.  Проверьте: пользователь из `lab.local` должен иметь возможность войти на клиент, присоединённый к `domain2.local` (используя логин `user@lab.local`).
+
+### Лабораторная 3: Настройка сервисов с доменной аутентификацией
+
+**Цель:** Интегрировать ключевые сетевые сервисы с FreeIPA.
+
+**Задачи:**
+1.  На отдельной ВМ настройте **Apache2** для защиты каталога с помощью Kerberos-аутентификации.
+2.  Настройте **Samba**-сервер, создайте общую папку и разрешите доступ только доменной группе `files_access`.
+3.  Настройте **PostgreSQL** на аутентификацию через PAM/SSSD. Создайте БД и проверьте вход под доменной учётной записью.
+4.  (Опционально, сложная) Настройте связку **Exim+Dovecot**.
+
+### Лабораторная 4: Создание доверительных отношений с Microsoft AD
+
+**Цель:** Интегрировать инфраструктуру Linux с существующим доменом Windows.
+
+**Задачи:**
+1.  Разверните ВМ с Windows Server и promoted её в контроллер домена (`ad.lab`, `AD.LAB`).
+2.  Создайте в AD тестового пользователя.
+3.  На FreeIPA-сервере (`ipa-srv01.lab.local`) настройте доверие к домену `ad.lab`.
+4.  Проверьте:
+    *   Поиск пользователя AD из FreeIPA: `ipa user-find --domain=ad.lab`.
+    *   Вход на `client01` под учётной записью пользователя из AD (`user@ad.lab`).
+
+Эти лабораторные работы дадут вам полное, практическое понимание построения комплексной инфраструктуры на основе FreeIPA.
