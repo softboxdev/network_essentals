@@ -266,7 +266,7 @@ sequenceDiagram
     participant ALD as ALD Controller
     participant FreeIPA as FreeIPA Server
     participant AD as Active Directory
-    participant Storage as Хранилище备份
+    participant Storage as Хранилище
     participant Monitor as Мониторинг
 
     Note over Backup, Storage: Ежедневное резервное копирование 03:00
