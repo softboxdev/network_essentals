@@ -818,6 +818,46 @@ flowchart TD
 Route Reflector --> Все филиалы: "ОК, запомнил вас как клиентов"
 ```
 
+```
+hostname    RR-MOSCOW
+
+key chain BGP-KEYS
+  key 1
+     key-string NETWORK_NAME
+     accept-lifetime 00:00:00 Jan 1 2025 infinite
+     send-lifetime 00:00:00 Jan 1 2025 infinite
+     cryptographic-algorithm HMAC-SHA-256
+
+
+
+IP: 10.255.255.254
+interface Loopback0
+  ip address 10.255.255.254 2555.255.255.255
+
+interface GigabitEthernet0/0
+  ip address 203.0.113.2 255.255.255.255.252
+
+interface GigabitEthernet0/1
+  ip address 198.51.100.2 255.255.255.255.252
+
+router bgp 65001
+  bgp router-id 10.255.255.254
+  neighbor RR-CLIENTS tcp-ao BGP-KEYCHAIN
+  neighbor RR-CLIENTS peer-group
+  neighbor RR-CLIENTS remote-as 65001
+  neighbor RR-CLIENTS description iBGP-RR-CLINETS
+  neighbor RR-CLIENTS route-reflector-client
+  neighbor RR_CLIENTS next-hop-self all
+
+  neighbor PROVIDERS peer-group
+  neighbor PROVIDERS ebgp-multihop 2
+  neighbor PROVIDERS update-source Loopback0
+
+address-family ipv4
+  network 10.0.0.0 mask 255.0.0.0
+
+```
+
 ### Шаг 2: Получение интернет-маршрутов
 ```mermaid
 sequenceDiagram
