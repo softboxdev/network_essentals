@@ -1,8 +1,114 @@
 # 📝 Решение проверочной работы по Bash
 
-Ниже представлены четыре скрипта с комментариями, обработкой ошибок и аккуратным выводом.
+---
+
+## ЗАДАНИЕ 1: `greeting.sh`
+
+```bash
+#!/bin/bash
+read -p "Введите ваше ФИО_ГРУППА: " name
+echo "Привет, $name! Добро пожаловать в мир Bash!"
+```
+
+**Запуск:**
+```bash
+chmod +x greeting.sh
+./greeting.sh
+```
 
 ---
+
+## ЗАДАНИЕ 2: `calculator.sh`
+
+```bash
+#!/bin/bash
+read -p "Введите первое число: " a
+read -p "Введите второе число: " b
+read -p "Введите операцию (+, -, *, /): " op
+
+case "$op" in
+    +) echo "Результат: $a + $b = $((a + b))" ;;
+    -) echo "Результат: $a - $b = $((a - b))" ;;
+    \*) echo "Результат: $a * $b = $((a * b))" ;;
+    /) echo "Результат: $a / $b = $((a / b))" ;;
+    *) echo "Неизвестная операция" ;;
+esac
+```
+
+**Запуск:**
+```bash
+chmod +x calculator.sh
+./calculator.sh
+```
+
+> ⚠️ Используется `$(( ))` — работает только с **целыми** числами. Для задания этого достаточно.
+
+---
+
+## ЗАДАНИЕ 3: `check_number.sh`
+
+```bash
+#!/bin/bash
+if [ "$1" -gt 0 ]; then
+    echo "Число $1 является положительным"
+elif [ "$1" -lt 0 ]; then
+    echo "Число $1 является отрицательным"
+else
+    echo "Число $1 является нулём"
+fi
+```
+
+**Запуск:**
+```bash
+chmod +x check_number.sh
+./check_number.sh -5
+./check_number.sh 0
+./check_number.sh 7
+```
+
+---
+
+## ЗАДАНИЕ 4: `list_files.sh`
+
+```bash
+#!/bin/bash
+if [ -d "$1" ]; then
+    echo "Найдены .txt файлы в $1:"
+    for f in "$1"/*.txt; do
+        [ -f "$f" ] && echo "- $(basename "$f") ($(du -h "$f" | cut -f1))"
+    done
+else
+    echo "Ошибка: директория '$1' не существует"
+fi
+```
+
+**Запуск:**
+```bash
+chmod +x list_files.sh
+./list_files.sh /home/user/documents
+```
+
+---
+
+## 🔧 Установка всех скриптов одной командой
+
+```bash
+chmod +x greeting.sh calculator.sh check_number.sh list_files.sh
+```
+
+---
+
+## 📸 Что снять на скриншоты
+
+1. Создание файлов (`nano greeting.sh`)
+2. `chmod +x *.sh`
+3. Запуск каждого скрипта:
+   - `./greeting.sh` → ввод имени
+   - `./calculator.sh` → 10, 5, `*` → 50
+   - `./check_number.sh -5` → отрицательное
+   - `./list_files.sh ~/documents` → список файлов
+
+## РАСШИРЕННЫЕ ВЕРСИИ
 
 ## ЗАДАНИЕ 1: `greeting.sh`
 
